@@ -1,137 +1,262 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>交通行为记录系统（批量连续录入版）</title>
+<title>Traffic Violation Recording</title>
 <style>
-body { font-family:-apple-system,BlinkMacSystemFont,sans-serif; margin:0; padding:10px; background:#f2f2f2;}
-header { position: sticky; top:0; background:#fff; padding:10px; z-index:10; display:flex; flex-direction:column; box-shadow:0 2px 4px rgba(0,0,0,0.1);}
-button { width:100%; padding:16px; font-size:18px; margin:4px 0; border-radius:12px; border:none; background:#007AFF; color:white; }
-.card { background:#fff; padding:12px; border-radius:12px; margin:6px 0; }
-.item { background:#fff; padding:12px; margin:6px 0; border-radius:10px; }
-.photo { width:100%; margin-top:6px; border-radius:8px; cursor:pointer; }
-.action-btn { background:#ff3b30; margin-top:6px; }
-#recordList { max-height:35vh; overflow-y:auto; margin-top:6px; }
-#behaviorContainer { max-height:35vh; overflow-y:auto; margin-top:6px; }
-#camera { display:none; }
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;margin:0;padding:10px;background:#f2f2f2;}
+h2{margin-top:0;text-align:center;}
+div.page{display:none;}
+div.active{display:block;}
+input{width:100%;padding:10px;margin:6px 0;border-radius:8px;border:1px solid #ccc;}
+button{width:100%;padding:16px;font-size:18px;margin:6px 0;border-radius:12px;border:none;background:#007AFF;color:white;}
+.menuBtn{position:absolute;right:10px;top:10px;background:#ccc;color:#000;width:40px;height:40px;border-radius:50%;font-size:18px;}
+.menuPanel{position:absolute;top:50px;right:10px;background:#fff;border:1px solid #ccc;border-radius:10px;display:none;z-index:20;padding:6px;}
+.menuPanel button{width:100%;margin:4px 0;}
+#camera{display:none;}
+.langBtn{width:48%;margin:6px 1%;padding:16px;font-size:18px;}
 </style>
 </head>
 <body>
 
-<header>
-<div class="card">
-<h2>开始巡查</h2>
-<label>观察地址 ID：</label>
-<input id="addrId" style="width:100%;padding:10px;margin:6px 0;border-radius:8px;border:1px solid #ccc">
-<label>位置：</label>
-<input id="location" style="width:100%;padding:10px;margin:6px 0;border-radius:8px;border:1px solid #ccc">
-<button onclick="startRecord()">开始记录</button>
-<button id="pauseBtn" onclick="togglePause()">暂停</button>
-<button id="multiBtn" onclick="toggleMulti()">多行为模式：关闭</button>
-<button onclick="recordSelected()">记录选中行为</button>
-<button onclick="exportCSV()">导出 CSV / Excel</button>
+<!-- Language Selection Page -->
+<div id="pageLang" class="page active" style="z-index:100;">
+  <h2>Select Language / 选择语言</h2>
+  <button class="langBtn" onclick="setLanguage('cn')">中文</button>
+  <button class="langBtn" onclick="setLanguage('en')">English</button>
 </div>
-</header>
 
-<div id="behaviorContainer" class="card"></div>
+<!-- Home Page -->
+<div id="pageHome" class="page">
+  <div>
+    <h2 id="homeTitle"></h2>
+    <label id="lblAddrId"></label>
+    <input id="addrId">
+    <label id="lblLocation"></label>
+    <input id="location">
+    <button id="btnStart" onclick="startRecord()"></button>
+  </div>
+</div>
 
-<h3>记录列表</h3>
-<div id="recordList"></div>
+<!-- Primary Menu -->
+<div id="pageMenu1" class="page">
+  <header>
+    <h2 id="primaryTitle"></h2>
+    <button class="menuBtn" onclick="toggleMenu()">☰</button>
+    <div class="menuPanel" id="menuPanel">
+      <button onclick="togglePause()" id="btnPause"></button>
+      <button onclick="stopRecord()" id="btnStop"></button>
+    </div>
+  </header>
+  <div id="buttonsContainer"></div>
+</div>
 
-<input type="file" accept="image/*" capture="environment" id="camera">
+<!-- Secondary Menu -->
+<div id="pageMenu2" class="page">
+  <h2 id="secondaryTitle"></h2>
+  <div id="buttonsContainer2"></div>
+  <input type="file" accept="image/*" capture="environment" id="camera">
+</div>
+
+<!-- Tertiary Menu -->
+<div id="pageMenu3" class="page">
+  <h2 id="tertiaryTitle"></h2>
+  <div id="buttonsContainer3"></div>
+</div>
 
 <script>
-let records = JSON.parse(localStorage.getItem("records")||"[]");
-let violationID="", addrId="", locationText="", multiMode=false, isPaused=false;
-let tempNote="", tempPhotos=[];
-let selectedBehaviors = [];
+let currentLang="";
+let texts = {
+  cn: {
+    homeTitle: "开始巡查",
+    lblAddrId: "观察地址 ID：",
+    lblLocation: "位置：",
+    btnStart: "开始记录",
+    primaryTitle: "选择一级行为",
+    btnPause: "暂停/恢复",
+    btnStop: "停止记录",
+    secondaryTitle: "选择二级行为",
+    tertiaryTitle: "选择三级行为",
+    addNote: "添加笔记（留空跳过）",
+    takePhoto: "是否拍照？确定=拍照，取消=跳过",
+    continueSameID: "是否继续记录属于同一违规ID的其他行为？",
+    recordingPaused: "记录已暂停",
+    recordingResumed: "记录已恢复",
+    recordingFinished: "记录结束，CSV 已导出！",
+    violationID: "违规ID",
+    level1: "一级行为",
+    level2: "二级行为",
+    level3: "三级行为",
+    locationID: "地址ID",
+    note: "笔记",
+    photo: "照片"
+  },
+  en: {
+    homeTitle: "Start Observation",
+    lblAddrId: "Observation Location ID:",
+    lblLocation: "Location:",
+    btnStart: "Start Recording",
+    primaryTitle: "Select Primary Violation",
+    btnPause: "Pause / Resume",
+    btnStop: "Stop Recording",
+    secondaryTitle: "Select Secondary Violation",
+    tertiaryTitle: "Select Tertiary Violation",
+    addNote: "Add Note (leave blank to skip)",
+    takePhoto: "Take a Photo? OK = Take, Cancel = Skip",
+    continueSameID: "Continue recording other violations under the same ID?",
+    recordingPaused: "Recording Paused",
+    recordingResumed: "Recording Resumed",
+    recordingFinished: "Recording finished. CSV exported!",
+    violationID: "Violation ID",
+    level1: "Primary Violation",
+    level2: "Secondary Violation",
+    level3: "Tertiary Violation",
+    locationID: "Location ID",
+    note: "Note",
+    photo: "Photo"
+  }
+};
 
-// 行为数组（包含逆行二级项目）
-const behaviors=[
-"闯红灯 - 左转 - 立即闯灯","闯红灯 - 左转 - 等候后闯灯",
-"闯红灯 - 直行 - 立即闯灯","闯红灯 - 直行 - 等候后闯灯",
-"闯红灯 - 右转 - 干扰其他方向",
-"头盔 - 完全包头盔","头盔 - 运动头盔","头盔 - 无头盔","头盔 - 其他",
-"逆行 - 单行线逆行","逆行 - 路口逆行","逆行 - 常规道路逆行",
-"号牌违章 - 遮挡 - 轻微遮挡","号牌违章 - 遮挡 - 完全遮挡",
-"号牌违章 - 故意损坏","号牌违章 - 无牌照","号牌违章 - 其他",
-"通行道路违规 - 违规行驶非机动车道","通行道路违规 - 违规行驶人行道",
-"通行道路违规 - 机动车道 - 不使用最右道通行","通行道路违规 - 机动车道 - 驶入公交道",
-"通行道路违规 - 机动车道 - 不驶入最左侧车道左转掉头","通行道路违规 - 机动车道 - 其他",
-"装载 - 超高","装载 - 超宽","装载 - 超长",
-"干扰驾驶 - 使用手持设备",
-"等候位置 - 停止线后","等候位置 - 人行横道上","等候位置 - 路口其他区域",
-"其他行为 - 鸣笛","其他行为 - 转弯不打信号灯",
-"停车 - 停入路侧停车位","停车 - 停入人行道","停车 - 堵塞出入口消防通道","停车 - 停在路肩"
-];
+let behaviors = {
+  cn: {
+    "闯红灯":{"左转":["立即闯灯","等候后闯灯"],"直行":["立即闯灯","等候后闯灯"],"右转":["干扰其他方向"]},
+    "头盔":{"完全包头盔":[],"运动头盔":[],"无头盔":[],"其他":[]},
+    "逆行":{"单行线逆行":[],"路口逆行":[],"常规道路逆行":[]},
+    "号牌违章":{"遮挡":["轻微遮挡","完全遮挡"],"故意损坏":[],"无牌照":[],"其他":[]},
+    "通行道路违规":{"违规行驶非机动车道":[],"违规行驶人行道":[],"违规行驶机动车道":["不使用最右道通行","驶入公交道","不驶入最左侧车道左转掉头","其他"]},
+    "装载":{"超高":[],"超宽":[],"超长":[]},
+    "干扰驾驶":{"使用手持设备":[]},
+    "等候位置":{"停止线后":[],"人行横道上":[],"路口其他区域":[]},
+    "其他行为":{"鸣笛":[],"转弯不打信号灯":[]},
+    "停车":{"停入路侧停车位":[],"停入人行道":[],"堵塞出入口消防通道":[],"停在路肩":[]}
+  },
+  en: {
+    "Running Red Light":{"Left Turn":["Immediate Run","Wait-and-run"],"Straight":["Immediate Run","Wait-and-run"],"Right Turn":["Interfere Other Direction"]},
+    "Helmet":{"Full Helmet":[],"Sport Helmet":[],"No Helmet":[],"Other":[]},
+    "Wrong-way Driving":{"One-way Street":[],"Intersection":[],"Regular Road":[]},
+    "License Plate Violation":{"Obstruction":["Slight Obstruction","Complete Obstruction"],"Deliberate Damage":[],"No License Plate":[],"Other":[]},
+    "Road Usage Violation":{"Bike Lane Violation":[],"Pedestrian Lane Violation":[],"Motor Vehicle Lane Violation":["Not Using Rightmost Lane","Enter Bus Lane","Not Using Leftmost Lane to Turn/U-turn","Other"]},
+    "Load Violation":{"Overheight":[],"Overwidth":[],"Overlength":[]},
+    "Distracted Driving":{"Using Handheld Device":[]},
+    "Waiting Position":{"Behind Stop Line":[],"On Crosswalk":[],"Other Intersection Area":[]},
+    "Other Behavior":{"Honking":[],"Turn Without Signal":[]},
+    "Parking Violation":{"Roadside Parking Spot":[],"Parked on Sidewalk":[],"Blocking Entrance/Fire Lane":[],"Parked on Shoulder":[]}
+  }
+};
 
-// 渲染行为勾选列表
-function renderBehaviorList(){
-  const container=document.getElementById("behaviorContainer");
+let records=[], violationID="", addrId="", locationText="", isPaused=false;
+let pathStack=[], tempNote="", selectedBehavior=null, tempPhotos=[];
+
+// --- Language Selection ---
+function setLanguage(lang){
+  currentLang = lang;
+  document.getElementById("pageLang").style.display="none";
+  showPage("pageHome");
+  applyTexts();
+}
+
+// Apply texts according to language
+function applyTexts(){
+  const t = texts[currentLang];
+  document.getElementById("homeTitle").textContent = t.homeTitle;
+  document.getElementById("lblAddrId").textContent = t.lblAddrId;
+  document.getElementById("lblLocation").textContent = t.lblLocation;
+  document.getElementById("btnStart").textContent = t.btnStart;
+  document.getElementById("primaryTitle").textContent = t.primaryTitle;
+  document.getElementById("btnPause").textContent = t.btnPause;
+  document.getElementById("btnStop").textContent = t.btnStop;
+  document.getElementById("secondaryTitle").textContent = t.secondaryTitle;
+  document.getElementById("tertiaryTitle").textContent = t.tertiaryTitle;
+}
+
+// --- Page Control ---
+function showPage(id){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+// --- Start recording ---
+function startRecord(){
+    addrId = document.getElementById("addrId").value.trim();
+    locationText = document.getElementById("location").value.trim();
+    if(!addrId || !locationText){ alert(currentLang==="cn"?"请填写完整信息":"Please fill in all information"); return; }
+    violationID = "VID-"+Date.now();
+    showPage("pageMenu1");
+    renderMenu1();
+}
+
+// --- Primary Menu ---
+function renderMenu1(){
+  const container=document.getElementById("buttonsContainer");
   container.innerHTML="";
-  behaviors.forEach(b=>{
-    const div=document.createElement("div");
-    const cb=document.createElement("input");
-    cb.type="checkbox";
-    cb.value=b;
-    cb.onchange=()=>updateSelected(b, cb.checked);
-    const label=document.createElement("label");
-    label.textContent=b;
-    label.style.marginLeft="8px";
-    div.appendChild(cb);
-    div.appendChild(label);
-    container.appendChild(div);
+  Object.keys(behaviors[currentLang]).forEach(key=>{
+    const btn=document.createElement("button");
+    btn.textContent=key;
+    btn.onclick=()=>selectMenu1(key);
+    container.appendChild(btn);
+  });
+}
+function selectMenu1(key){
+  if(isPaused){ alert(texts[currentLang].recordingPaused); return;}
+  pathStack=[key];
+  const secondLevel = behaviors[currentLang][key];
+  if(Object.keys(secondLevel).length>0){
+    renderMenu2(secondLevel);
+    showPage("pageMenu2");
+  } else {
+    selectedBehavior = key;
+    confirmRecord();
+  }
+}
+
+// --- Secondary Menu ---
+function renderMenu2(data){
+  const container=document.getElementById("buttonsContainer2");
+  container.innerHTML="";
+  Object.keys(data).forEach(k=>{
+    const btn=document.createElement("button");
+    btn.textContent=k;
+    btn.onclick=()=>selectMenu2(k,data[k]);
+    container.appendChild(btn);
+  });
+}
+function selectMenu2(key,nextData){
+  if(isPaused){ alert(texts[currentLang].recordingPaused); return;}
+  pathStack.push(key);
+  if(nextData.length>0){
+    renderMenu3(nextData);
+    showPage("pageMenu3");
+  } else {
+    selectedBehavior = pathStack.join(" - ");
+    confirmRecord();
+  }
+}
+
+// --- Tertiary Menu ---
+function renderMenu3(list){
+  const container=document.getElementById("buttonsContainer3");
+  container.innerHTML="";
+  list.forEach(item=>{
+    const btn=document.createElement("button");
+    btn.textContent=item;
+    btn.onclick=()=>{ pathStack.push(item); selectedBehavior = pathStack.join(" - "); confirmRecord();}
+    container.appendChild(btn);
   });
 }
 
-// 更新选中行为数组
-function updateSelected(b, checked){
-  if(checked) selectedBehaviors.push(b);
-  else selectedBehaviors = selectedBehaviors.filter(x=>x!==b);
+// --- Confirm Record ---
+function confirmRecord(){
+  tempNote = prompt(texts[currentLang].addNote,"")||"";
+  const takePhoto = confirm(texts[currentLang].takePhoto);
+  if(takePhoto){ document.getElementById("camera").click(); return;}
+  saveRecord();
 }
 
-// 开始记录
-function startRecord(){
-  addrId=document.getElementById("addrId").value.trim();
-  locationText=document.getElementById("location").value.trim();
-  if(!addrId||!locationText){ alert("请填写完整信息"); return;}
-  if(multiMode && !violationID) violationID="VID-"+Date.now();
-  renderBehaviorList();
-}
-
-// 暂停/恢复
-function togglePause(){
-  isPaused=!isPaused;
-  document.getElementById("pauseBtn").textContent=isPaused?"恢复记录":"暂停";
-  alert(isPaused?"记录已暂停":"记录已恢复");
-}
-
-// 多行为模式切换
-function toggleMulti(){
-  multiMode=!multiMode;
-  document.getElementById("multiBtn").textContent="多行为模式：" + (multiMode?"开启":"关闭");
-  if(multiMode && !violationID) violationID="VID-"+Date.now();
-  if(!multiMode) violationID="VID-"+Date.now();
-}
-
-// 批量记录选中行为
-function recordSelected(){
-  if(isPaused){ alert("记录已暂停"); return;}
-  if(selectedBehaviors.length===0){ alert("请选择行为"); return;}
-
-  const notePrompt = prompt("可为本批次添加笔记（留空跳过）", tempNote||"");
-  if(notePrompt !== null) tempNote = notePrompt;
-
-  const takePhoto = confirm("是否为本批次拍照？\n确定=拍照\n取消=不拍照");
-  if(takePhoto){ document.getElementById("camera").click(); }
-  else { saveBatchRecords(selectedBehaviors); }
-}
-
-// 拍照处理
-document.getElementById("camera").addEventListener("change", function(e){
+// --- Camera ---
+document.getElementById("camera").addEventListener("change",function(e){
   const files = e.target.files;
-  if(files.length===0) return;
+  if(files.length===0){ saveRecord(); return;}
   tempPhotos=[];
   for(let i=0;i<files.length;i++){
     const reader=new FileReader();
@@ -139,62 +264,60 @@ document.getElementById("camera").addEventListener("change", function(e){
     reader.readAsDataURL(files[i]);
   }
   e.target.value="";
-  saveBatchRecords(selectedBehaviors);
+  setTimeout(saveRecord,500);
 });
 
-// 保存批量记录
-function saveBatchRecords(behaviorsArr){
-  if(!multiMode) violationID="VID-"+Date.now();
+// --- Save Record ---
+function saveRecord(){
   const time=new Date().toLocaleString();
-  behaviorsArr.forEach(type=>{
-    records.push({violationID, addrId, location:locationText, type, time, photos:tempPhotos, note:tempNote});
-  });
-  localStorage.setItem("records", JSON.stringify(records));
-  tempPhotos=[]; selectedBehaviors=[];
-  renderBehaviorList(); // 清空勾选
-  renderRecords();
+  records.push({violationID, addrId, location:locationText, type:selectedBehavior, time, note:tempNote, photos:tempPhotos});
+  tempPhotos=[]; tempNote=""; selectedBehavior=null; pathStack=[];
+  const cont = confirm(texts[currentLang].continueSameID);
+  if(!cont) violationID="VID-"+Date.now();
+  showPage("pageMenu1");
+  renderMenu1();
 }
 
-// 渲染记录列表
-function renderRecords(){
-  const list=document.getElementById("recordList");
-  list.innerHTML="";
-  records.forEach((r,i)=>{
-    let imgs="";
-    r.photos.forEach(p=>{ imgs+=`<img src="${p}" class="photo" onclick="window.open('${p}')">`; });
-    list.innerHTML+=`<div class="item">
-      <div><b>[${r.violationID}] ${r.type}</b></div>
-      <div>地址ID：${r.addrId}</div>
-      <div>位置：${r.location}</div>
-      <div>时间：${r.time}</div>
-      <div>笔记：${r.note||""}</div>
-      ${imgs}
-      <button class="action-btn" onclick="del(${i})">删除</button>
-    </div>`;
-  });
+// --- Pause / Resume ---
+function togglePause(){ 
+  isPaused=!isPaused; 
+  alert(isPaused?texts[currentLang].recordingPaused:texts[currentLang].recordingResumed); 
 }
 
-// 删除记录
-function del(i){ records.splice(i,1); localStorage.setItem("records",JSON.stringify(records)); renderRecords(); }
+// --- Menu toggle ---
+function toggleMenu(){
+  const panel = document.getElementById("menuPanel");
+  panel.style.display = panel.style.display==="block"?"none":"block";
+}
 
-// 导出 CSV
-function exportCSV(){
-  if(records.length===0){ alert("没有记录可导出"); return; }
-  let csv="违规ID,行为类别,地址ID,位置,时间,笔记,照片\n";
+// --- Stop recording ---
+function stopRecord(){
+  if(records.length>0) exportCSV(records);
+  alert(texts[currentLang].recordingFinished);
+  location.reload();
+}
+
+// --- Export CSV ---
+function exportCSV(records){
+  const t = texts[currentLang];
+  let csv=`${t.violationID},${t.level1},${t.level2},${t.level3},${t.locationID},${t.location},Time,${t.note},${t.photo}\n`;
   records.forEach(r=>{
-    let photos=r.photos.join(" | ");
-    csv+=`"${r.violationID}","${r.type}","${r.addrId}","${r.location}","${r.time}","${r.note||""}","${photos}"\n`;
+    const parts = r.type.split(" - ");
+    const level1 = parts[0] || "";
+    const level2 = parts[1] || "";
+    const level3 = parts[2] || "";
+    let photos = r.photos.join(" | ");
+    csv+=`"${r.violationID}","${level1}","${level2}","${level3}","${r.addrId}","${r.location}","${r.time}","${r.note}","${photos}"\n`;
   });
-  const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
-  const url=URL.createObjectURL(blob);
-  const link=document.createElement("a");
-  link.href=url;
+  const blob = new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
   link.download="traffic_records.csv";
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
 }
-
 </script>
 </body>
 </html>
