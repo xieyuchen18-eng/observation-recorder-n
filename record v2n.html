@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>交通行为记录系统（批量连续录入版）</title>
+<style>
+body { font-family:-apple-system,BlinkMacSystemFont,sans-serif; margin:0; padding:10px; background:#f2f2f2;}
+header { position: sticky; top:0; background:#fff; padding:10px; z-index:10; display:flex; flex-direction:column; box-shadow:0 2px 4px rgba(0,0,0,0.1);}
+button { width:100%; padding:16px; font-size:18px; margin:4px 0; border-radius:12px; border:none; background:#007AFF; color:white; }
+.card { background:#fff; padding:12px; border-radius:12px; margin:6px 0; }
+.item { background:#fff; padding:12px; margin:6px 0; border-radius:10px; }
+.photo { width:100%; margin-top:6px; border-radius:8px; cursor:pointer; }
+.action-btn { background:#ff3b30; margin-top:6px; }
+#recordList { max-height:35vh; overflow-y:auto; margin-top:6px; }
+#behaviorContainer { max-height:35vh; overflow-y:auto; margin-top:6px; }
+#camera { display:none; }
+</style>
+</head>
+<body>
+
+<header>
+<div class="card">
+<h2>开始巡查</h2>
+<label>观察地址 ID：</label>
+<input id="addrId" style="width:100%;padding:10px;margin:6px 0;border-radius:8px;border:1px solid #ccc">
+<label>位置：</label>
+<input id="location" style="width:100%;padding:10px;margin:6px 0;border-radius:8px;border:1px solid #ccc">
+<button onclick="startRecord()">开始记录</button>
+<button id="pauseBtn" onclick="togglePause()">暂停</button>
+<button id="multiBtn" onclick="toggleMulti()">多行为模式：关闭</button>
+<button onclick="recordSelected()">记录选中行为</button>
+<button onclick="exportCSV()">导出 CSV / Excel</button>
+</div>
+</header>
+
+<div id="behaviorContainer" class="card"></div>
+
+<h3>记录列表</h3>
+<div id="recordList"></div>
+
+<input type="file" accept="image/*" capture="environment" id="camera">
+
+<script>
+let records = JSON.parse(localStorage.getItem("records")||"[]");
+let violationID="", addrId="", locationText="", multiMode=false, isPaused=false;
+let tempNote="", tempPhotos=[];
+let selectedBehaviors = [];
+
+// 行为数组（包含逆行二级项目）
+const behaviors=[
+"闯红灯 - 左转 - 立即闯灯","闯红灯 - 左转 - 等候后闯灯",
+"闯红灯 - 直行 - 立即闯灯","闯红灯 - 直行 - 等候后闯灯",
+"闯红灯 - 右转 - 干扰其他方向",
+"头盔 - 完全包头盔","头盔 - 运动头盔","头盔 - 无头盔","头盔 - 其他",
+"逆行 - 单行线逆行","逆行 - 路口逆行","逆行 - 常规道路逆行",
+"号牌违章 - 遮挡 - 轻微遮挡","号牌违章 - 遮挡 - 完全遮挡",
+"号牌违章 - 故意损坏","号牌违章 - 无牌照","号牌违章 - 其他",
+"通行道路违规 - 违规行驶非机动车道","通行道路违规 - 违规行驶人行道",
+"通行道路违规 - 机动车道 - 不使用最右道通行","通行道路违规 - 机动车道 - 驶入公交道",
+"通行道路违规 - 机动车道 - 不驶入最左侧车道左转掉头","通行道路违规 - 机动车道 - 其他",
+"装载 - 超高","装载 - 超宽","装载 - 超长",
+"干扰驾驶 - 使用手持设备",
+"等候位置 - 停止线后","等候位置 - 人行横道上","等候位置 - 路口其他区域",
+"其他行为 - 鸣笛","其他行为 - 转弯不打信号灯",
+"停车 - 停入路侧停车位","停车 - 停入人行道","停车 - 堵塞出入口消防通道","停车 - 停在路肩"
+];
+
+// 渲染行为勾选列表
+function renderBehaviorList(){
+  const container=document.getElementById("behaviorContainer");
+  container.innerHTML="";
+  behaviors.forEach(b=>{
+    const div=document.createElement("div");
+    const cb=document.createElement("input");
+    cb.type="checkbox";
+    cb.value=b;
+    cb.onchange=()=>updateSelected(b, cb.checked);
+    const label=document.createElement("label");
+    label.textContent=b;
+    label.style.marginLeft="8px";
+    div.appendChild(cb);
+    div.appendChild(label);
+    container.appendChild(div);
+  });
+}
+
+// 更新选中行为数组
+function updateSelected(b, checked){
+  if(checked) selectedBehaviors.push(b);
+  else selectedBehaviors = selectedBehaviors.filter(x=>x!==b);
+}
+
+// 开始记录
+function startRecord(){
+  addrId=document.getElementById("addrId").value.trim();
+  locationText=document.getElementById("location").value.trim();
+  if(!addrId||!locationText){ alert("请填写完整信息"); return;}
+  if(multiMode && !violationID) violationID="VID-"+Date.now();
+  renderBehaviorList();
+}
+
+// 暂停/恢复
+function togglePause(){
+  isPaused=!isPaused;
+  document.getElementById("pauseBtn").textContent=isPaused?"恢复记录":"暂停";
+  alert(isPaused?"记录已暂停":"记录已恢复");
+}
+
+// 多行为模式切换
+function toggleMulti(){
+  multiMode=!multiMode;
+  document.getElementById("multiBtn").textContent="多行为模式：" + (multiMode?"开启":"关闭");
+  if(multiMode && !violationID) violationID="VID-"+Date.now();
+  if(!multiMode) violationID="VID-"+Date.now();
+}
+
+// 批量记录选中行为
+function recordSelected(){
+  if(isPaused){ alert("记录已暂停"); return;}
+  if(selectedBehaviors.length===0){ alert("请选择行为"); return;}
+
+  const notePrompt = prompt("可为本批次添加笔记（留空跳过）", tempNote||"");
+  if(notePrompt !== null) tempNote = notePrompt;
+
+  const takePhoto = confirm("是否为本批次拍照？\n确定=拍照\n取消=不拍照");
+  if(takePhoto){ document.getElementById("camera").click(); }
+  else { saveBatchRecords(selectedBehaviors); }
+}
+
+// 拍照处理
+document.getElementById("camera").addEventListener("change", function(e){
+  const files = e.target.files;
+  if(files.length===0) return;
+  tempPhotos=[];
+  for(let i=0;i<files.length;i++){
+    const reader=new FileReader();
+    reader.onload=(ev)=>{ tempPhotos.push(ev.target.result); };
+    reader.readAsDataURL(files[i]);
+  }
+  e.target.value="";
+  saveBatchRecords(selectedBehaviors);
+});
+
+// 保存批量记录
+function saveBatchRecords(behaviorsArr){
+  if(!multiMode) violationID="VID-"+Date.now();
+  const time=new Date().toLocaleString();
+  behaviorsArr.forEach(type=>{
+    records.push({violationID, addrId, location:locationText, type, time, photos:tempPhotos, note:tempNote});
+  });
+  localStorage.setItem("records", JSON.stringify(records));
+  tempPhotos=[]; selectedBehaviors=[];
+  renderBehaviorList(); // 清空勾选
+  renderRecords();
+}
+
+// 渲染记录列表
+function renderRecords(){
+  const list=document.getElementById("recordList");
+  list.innerHTML="";
+  records.forEach((r,i)=>{
+    let imgs="";
+    r.photos.forEach(p=>{ imgs+=`<img src="${p}" class="photo" onclick="window.open('${p}')">`; });
+    list.innerHTML+=`<div class="item">
+      <div><b>[${r.violationID}] ${r.type}</b></div>
+      <div>地址ID：${r.addrId}</div>
+      <div>位置：${r.location}</div>
+      <div>时间：${r.time}</div>
+      <div>笔记：${r.note||""}</div>
+      ${imgs}
+      <button class="action-btn" onclick="del(${i})">删除</button>
+    </div>`;
+  });
+}
+
+// 删除记录
+function del(i){ records.splice(i,1); localStorage.setItem("records",JSON.stringify(records)); renderRecords(); }
+
+// 导出 CSV
+function exportCSV(){
+  if(records.length===0){ alert("没有记录可导出"); return; }
+  let csv="违规ID,行为类别,地址ID,位置,时间,笔记,照片\n";
+  records.forEach(r=>{
+    let photos=r.photos.join(" | ");
+    csv+=`"${r.violationID}","${r.type}","${r.addrId}","${r.location}","${r.time}","${r.note||""}","${photos}"\n`;
+  });
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement("a");
+  link.href=url;
+  link.download="traffic_records.csv";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+</script>
+</body>
+</html>
